@@ -8,6 +8,16 @@ const date = (v) => (v ? new Date(v) : null);
 
 export const erpStatusFor = (fulfilmentState) => ERP_STATUS_BY_FULFILMENT[fulfilmentState] || "pending";
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Rafttaar's order lines carry the catalogue product code in `productId` (e.g. KAPO-ABCE-0018) — that code is the
+// SKU the inventory API expects. Use it unless it is clearly a UUID or a sandbox placeholder.
+const skuFor = (it) => {
+  const explicit = str(it.sku || it.productCode);
+  if (explicit) return explicit;
+  const pid = str(it.productId);
+  return pid && !UUID.test(pid) && !pid.startsWith("sandbox-") ? pid : "";
+};
+
 export const isSandboxOrderId = (id) => String(id || "").startsWith("sandbox-");
 
 /**
@@ -23,7 +33,7 @@ export function mapRemoteOrder(remote, listItem = null) {
   const buyer = remote.buyer || {};
   const items = (remote.items || []).map((it) => ({
     productName: str(it.name, "Item"),
-    sku: str(it.sku || it.productCode || ""),
+    sku: skuFor(it),
     quantity: Number(it.quantity) || 1,
     price: paiseToRupees(it.unitPricePaise),
     lineId: str(it.lineId),

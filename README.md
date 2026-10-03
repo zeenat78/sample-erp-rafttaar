@@ -324,6 +324,11 @@ npm test      # unit + end-to-end against an in-process mock of the Partner API 
 ### Verified live with an `rtk_live_` key (seller: Kapoor Industries, integration "Thriveda ERP System")
 
 Webhook register -> signed test event delivered (HTTP 200) -> pause/resume -> secret rotation -> new-secret delivery; location upsert
-(carrierStatus `ready`, re-upsert of the same code updated in place, no duplicate); inventory per-item result (`not_found`);
-`SANDBOX_ONLY` passthrough. Not exercised live because the seller had no live orders: acknowledge/confirm/dispatch on a real order,
-ERP-issued invoice, and inventory on a real catalogue SKU.
+(carrierStatus `ready`, re-upsert of the same code updated in place, no duplicate); inventory (`not_found` for an unknown SKU,
+`updated` for the real SKU `KAPO-ABCE-0018` at warehouse `ERP-TEST-01`); `SANDBOX_ONLY` passthrough.
+
+A real buyer order (`Fan Belt`, ₹12,015.94 incl. logistics) was received by polling and taken through acknowledge -> confirm -> packaging
+-> dispatch (real shipment booked: `bookingStatus CONFIRMED`, AWB assigned asynchronously by the carrier) with
+`shipment.booked` applied from the event log; a second dispatch answered `SHIPMENT_ALREADY_BOOKED`, cancel after dispatch answered
+`INVALID_TRANSITION`, the label answered `LABEL_NOT_READY` until the AWB exists. `POST .../invoice` answered `INVOICE_LOCKED` (this
+seller's invoices are issued by Rafttaar), so the ERP-issued-invoice path is covered by the mock tests only.
