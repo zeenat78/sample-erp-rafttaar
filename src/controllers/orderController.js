@@ -1,4 +1,4 @@
-import { Order } from "../models/Order.js";
+import { Order, ORDER_STATUSES } from "../models/Order.js";
 
 const calculateTotal = (items) =>
   Number(items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.price), 0).toFixed(2));
@@ -83,8 +83,21 @@ export async function createOrder(req, res) {
 }
 
 export async function updateOrder(req, res) {
-  const allowed = ["pending", "confirmed", "processing", "shipped", "delivered", "cancelled"];
+  const allowed = ORDER_STATUSES;
   const updates = {};
+
+  // Orders that came from Rafttaar are driven by Rafttaar's own lifecycle
+  // (acknowledge/confirm/dispatch...). Letting someone flip the status here
+  // would make the ERP disagree with Rafttaar, so route them to the actions.
+  const existing = await Order.findById(req.params.id).select("source status").lean();
+  if (existing?.source === "rafttaar" && req.body.status !== undefined && req.body.status !== existing.status) {
+    return res.status(409).json({
+      success: false,
+      code: "USE_RAFTTAAR_ACTIONS",
+      message:
+        "This order is managed through Rafttaar. Use its Rafttaar actions (acknowledge, confirm, dispatch, cancel) instead of editing the status."
+    });
+  }
 
   if (req.body.status !== undefined) {
     if (!allowed.includes(req.body.status)) {

@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -14,7 +15,8 @@
     "express": "^5.1.0",
     "helmet": "^8.1.0",
     "mongoose": "^8.18.0",
-    "morgan": "^1.10.1"
+    "morgan": "^1.10.1",
+    "pdfkit": "^0.20.2"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
