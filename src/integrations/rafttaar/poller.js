@@ -57,6 +57,26 @@ async function findHeadCursor(client, from = 0) {
   return cursor;
 }
 
+/**
+ * If the configured key now belongs to a different environment than the stored sync state,
+ * forget the cursor and webhook of the old one. Returns true when a reset happened.
+ */
+export async function ensureEnvironment() {
+  const settings = await getSettings();
+  const env = loadConfig().environment;
+  if (settings.environment === env) return false;
+  const firstRun = !settings.environment && !settings.bootstrappedAt && !settings.webhook?.id;
+  await RafttaarSetting.updateOne(
+    { key: "rafttaar" },
+    {
+      $set: { environment: env, cursor: 0, webhook: {}, ...(settings.syncMode === "webhook" ? { syncMode: "polling" } : {}) },
+      $unset: { bootstrappedAt: "", lastReconcileAt: "", lastPollError: "" }
+    }
+  );
+  if (!firstRun) log(`environment changed ${settings.environment || "?"} -> ${env}: sync state reset`);
+  return !firstRun;
+}
+
 export async function bootstrap({ client = getClient() } = {}) {
   await getSettings(); // make sure the settings document exists before we write the cursor into it
   const head = await findHeadCursor(client, 0);
@@ -68,6 +88,7 @@ export async function bootstrap({ client = getClient() } = {}) {
 
 /** One pass over new events. Returns what happened. */
 export async function pollOnce({ client = getClient() } = {}) {
+  await ensureEnvironment();
   let settings = await getSettings();
   if (!settings.bootstrappedAt) {
     await bootstrap({ client });
@@ -114,6 +135,7 @@ async function runTick({ force = false } = {}) {
   const cfg = loadConfig();
   if (!isConfigured(cfg)) return { skipped: "not_configured" };
 
+  await ensureEnvironment();
   const settings = await getSettings();
   if (!force && settings.syncMode === "off") return { skipped: "sync_off" };
   if (!(await acquireLease())) return { skipped: "lease_held_elsewhere" };

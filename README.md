@@ -319,3 +319,11 @@ npm test      # unit + end-to-end against an in-process mock of the Partner API 
 - Sandbox orders cannot be dispatched (`SANDBOX_ORDER_CANNOT_DISPATCH`); simulate carrier progress with the sandbox advance call.
 - A seller whose invoices are issued by Rafttaar gets `INVOICE_LOCKED` on `POST .../invoice` — Rafttaar invoices at dispatch.
 - The event log (`seq`) is global across sellers, so the first poll of a fresh integration starts mid-sequence.
+- Switching the key between `rtk_test_` and `rtk_live_` resets the stored cursor/bootstrap/webhook automatically (a sandbox cursor must never read live events).
+
+### Verified live with an `rtk_live_` key (seller: Kapoor Industries, integration "Thriveda ERP System")
+
+Webhook register -> signed test event delivered (HTTP 200) -> pause/resume -> secret rotation -> new-secret delivery; location upsert
+(carrierStatus `ready`, re-upsert of the same code updated in place, no duplicate); inventory per-item result (`not_found`);
+`SANDBOX_ONLY` passthrough. Not exercised live because the seller had no live orders: acknowledge/confirm/dispatch on a real order,
+ERP-issued invoice, and inventory on a real catalogue SKU.

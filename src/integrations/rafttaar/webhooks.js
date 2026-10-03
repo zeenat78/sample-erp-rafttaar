@@ -3,6 +3,7 @@ import { getClient, getSettings, loadConfig } from "./config.js";
 import { EVENT_TYPES, MAX_WEBHOOKS } from "./constants.js";
 import { ActionError } from "./actions.js";
 import { ingestEvent } from "./eventProcessor.js";
+import { ensureEnvironment } from "./poller.js";
 import { SignatureError, verifyWebhookSignature } from "./signature.js";
 
 export const WEBHOOK_PATH = "/webhooks/rafttaar";
@@ -44,6 +45,7 @@ export async function listWebhooks({ client = getClient() } = {}) {
 }
 
 export async function registerWebhook({ url, eventTypes, client = getClient() } = {}) {
+  await ensureEnvironment();
   const settings = await getSettings();
   if (settings.webhook?.id) {
     const remote = await client.listWebhooks();

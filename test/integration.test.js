@@ -507,3 +507,15 @@ test("sandbox helper refuses live keys at Rafttaar (SANDBOX_ONLY passes through)
   await liveMock.close();
   M.config._setClientForTests(new RafttaarClient({ apiKey: mock.apiKey, baseUrl: mock.baseUrl, ratePerSec: 1000, burst: 1000, sleep: async () => {} }));
 });
+
+test("switching the key between environments resets cursor, bootstrap and webhook (a sandbox cursor must never read live events)", async () => {
+  await M.Setting.updateOne({ key: "rafttaar" }, { $set: { environment: "live", cursor: 123, bootstrappedAt: new Date(), webhook: { id: "w-old", secret: "s" }, syncMode: "webhook" } });
+  assert.equal(await M.poller.ensureEnvironment(), true); // configured key is rtk_test_ -> "test"
+  const s = await M.Setting.findOne({ key: "rafttaar" });
+  assert.equal(s.environment, "test");
+  assert.equal(s.cursor, 0);
+  assert.equal(s.bootstrappedAt, undefined);
+  assert.equal(s.webhook?.id, undefined);
+  assert.equal(s.syncMode, "polling");
+  assert.equal(await M.poller.ensureEnvironment(), false); // stable afterwards
+});

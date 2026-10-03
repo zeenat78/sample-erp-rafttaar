@@ -9,6 +9,11 @@ const schema = new mongoose.Schema(
   {
     key: { type: String, required: true, unique: true, default: "rafttaar" },
 
+    // Which API environment ("test" | "live") the cursor / webhook below belong to. Switching the key
+    // between environments resets them (see poller.js ensureEnvironment) — a sandbox cursor must
+    // never be used to read live events, and a sandbox webhook is not a live webhook.
+    environment: String,
+
     syncMode: { type: String, enum: ["off", "polling", "webhook"], default: "polling" },
     pollIntervalSec: { type: Number, default: 10, min: 2 },
 
