@@ -76,12 +76,13 @@ async function mountRafttaarPanel(order, refreshModal) {
         ${kv("Last synced", when(r.lastSyncedAt))}
       </div>
     </div>
+    ${extras.actions.filter((a) => a.status === "pending").map((a) => `<div class="alert inline">⏳ <b>${E(a.type)}</b> is waiting to be retried${a.lastError ? ` — Rafttaar answered ${E(a.lastError.code)}${a.lastError.httpStatus ? ` (HTTP ${E(a.lastError.httpStatus)})` : ""}` : ""}. Next try: ${E(when(a.nextRetryAt))}. It keeps its Idempotency-Key, so a retry can never double-act. If the input was wrong, abandon it and submit again.</div>`).join("")}
     <div class="actions left" id="rtActions">${buttons.join("")}</div>
     <div id="rtForm"></div>
     <div id="rtTracking"></div>
     <h3 style="margin-top:18px">Action history</h3>
-    ${extras.actions.length ? `<table class="mini"><thead><tr><th>When</th><th>Action</th><th>Status</th><th>Detail</th></tr></thead><tbody>
-      ${extras.actions.map((a) => `<tr><td>${E(when(a.createdAt))}</td><td>${E(a.type)}${a.payload?.status ? ` → ${E(a.payload.status)}` : ""}</td><td><span class="tag ${a.status}">${E(a.status)}</span>${a.attempts > 1 ? ` <span class="sub">${a.attempts} tries</span>` : ""}</td><td class="sub">${E(a.lastError ? `${a.lastError.code}: ${a.lastError.message}` : "")}</td></tr>`).join("")}
+    ${extras.actions.length ? `<table class="mini"><thead><tr><th>When</th><th>Action</th><th>Status</th><th>Detail</th><th></th></tr></thead><tbody>
+      ${extras.actions.map((a) => `<tr><td>${E(when(a.createdAt))}</td><td>${E(a.type)}${a.payload?.status ? ` → ${E(a.payload.status)}` : ""}</td><td><span class="tag ${E(a.status)}">${E(a.status)}</span>${a.attempts > 1 ? ` <span class="sub">${E(a.attempts)} tries</span>` : ""}</td><td class="sub">${E(a.lastError ? `${a.lastError.code}: ${a.lastError.message}` : "")}</td><td>${["pending", "dead"].includes(a.status) ? `<button class="secondary sm danger" data-abandon="${E(a._id)}">Abandon</button>` : ""}</td></tr>`).join("")}
     </tbody></table>` : `<p class="sub">No actions yet.</p>`}
   `;
 
@@ -172,6 +173,17 @@ async function mountRafttaarPanel(order, refreshModal) {
   $("#rtActions").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-act]");
     if (b) handlers[b.dataset.act]?.();
+  });
+  host.addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-abandon]");
+    if (!b) return;
+    if (!confirm("Abandon this action? If Rafttaar already processed it, it will be recorded as done instead.")) return;
+    const r = await guarded(() => api(`/rafttaar/actions/${b.dataset.abandon}/abandon`, { method: "POST", body: "{}" }));
+    if (r) {
+      toast(r.outcome === "already_applied" ? `Rafttaar already shows this order as ${r.state} — the earlier attempt went through.` : "Action abandoned — you can submit it again.", r.outcome === "already_applied" ? "warn" : "ok");
+      await refreshModal();
+      loadOrders();
+    }
   });
 }
 
@@ -439,11 +451,15 @@ const TAB_RENDERERS = {
     if (!actions) return;
     tabBody().innerHTML = card("Outbox — everything this ERP asked Rafttaar to do", actions.length ? `<table class="mini"><thead><tr><th>When</th><th>Order</th><th>Action</th><th>Status</th><th>Tries</th><th>Detail</th><th></th></tr></thead><tbody>
       ${actions.map((a) => `<tr><td class="sub">${E(when(a.createdAt))}</td><td class="sub">${E(a.rafttaarOrderId || "")}</td><td>${E(a.type)}${a.payload?.status ? ` → ${E(a.payload.status)}` : ""}</td><td><span class="tag ${E(a.status)}">${E(a.status)}</span></td><td>${E(a.attempts)}</td><td class="sub">${E(a.lastError ? `${a.lastError.code}: ${a.lastError.message}` : a.nextRetryAt && a.status === "pending" ? `retry ${when(a.nextRetryAt)}` : "")}</td>
-      <td>${a.status === "dead" ? `<button class="secondary sm" data-act-retry="${E(a._id)}">Retry</button>` : ""}</td></tr>`).join("")}</tbody></table>
+      <td class="row-actions">${a.status === "dead" ? `<button class="secondary sm" data-act-retry="${E(a._id)}">Retry</button>` : ""}${["pending", "dead"].includes(a.status) ? ` <button class="secondary sm danger" data-act-abandon="${E(a._id)}">Abandon</button>` : ""}</td></tr>`).join("")}</tbody></table>
       <p class="sub">Each row carries its own Idempotency-Key, so a retry after a network failure can never double-book a shipment.</p>` : `<p class="sub">No actions yet.</p>`);
     tabBody().addEventListener("click", (e) => {
       const b = e.target.closest("[data-act-retry]");
       if (b) guarded(() => api(`/rafttaar/actions/${b.dataset.actRetry}/retry`, { method: "POST", body: "{}" }).then((r) => toast(`Retry: ${r.status}`)), { reload: () => runTab("actions") });
+      const ab = e.target.closest("[data-act-abandon]");
+      if (ab && confirm("Abandon this action? If Rafttaar already processed it, it will be recorded as done instead.")) {
+        guarded(() => api(`/rafttaar/actions/${ab.dataset.actAbandon}/abandon`, { method: "POST", body: "{}" }).then((r) => toast(r.outcome === "already_applied" ? `Already applied on Rafttaar (${r.state})` : "Abandoned")), { reload: () => runTab("actions") });
+      }
     });
   },
 

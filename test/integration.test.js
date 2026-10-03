@@ -519,3 +519,83 @@ test("switching the key between environments resets cursor, bootstrap and webhoo
   assert.equal(s.syncMode, "polling");
   assert.equal(await M.poller.ensureEnvironment(), false); // stable afterwards
 });
+
+// ------------------------------------------------------------------ dispatch input + abandon
+
+async function readyToDispatch() {
+  const { remote, erp } = await newOrder({ subtotalPaise: 500000, gstPaise: 90000 });
+  await M.Setting.updateOne({ key: "rafttaar" }, { $set: { "invoice.sellerState": "Karnataka" } });
+  await act(erp, "acknowledge");
+  await act(erp, "status", { status: "confirmed" });
+  await act(erp, "status", { status: "packaging" });
+  assert.equal((await act(erp, "invoice", {})).status, 200);
+  return { remote, erp };
+}
+
+test("dispatch: fields left blank are filled from the saved defaults (dimensions without a weight used to reach the carrier API half-empty)", async () => {
+  const { erp } = await readyToDispatch();
+  await M.Setting.updateOne({ key: "rafttaar" }, { $set: { "dispatchDefaults.weightKg": 3 } });
+  const r = await act(erp, "dispatch", { packages: { lengthCm: "110", widthCm: 21, heightCm: 1, weightKg: "" }, boxCount: 2 });
+  assert.equal(r.status, 200, r.text);
+  const sent = mock.state.calls.filter((c) => c.method === "POST" && c.path.endsWith("/dispatch")).at(-1).body;
+  assert.deepEqual(sent.packages, { weightKg: 3, lengthCm: 110, widthCm: 21, heightCm: 1 });
+  assert.equal(sent.boxCount, 2);
+});
+
+test("dispatch: nonsense package input is rejected before anything is sent", async () => {
+  const { erp } = await readyToDispatch();
+  const before = mock.state.calls.length;
+  for (const bad of [{ packages: { weightKg: -1 } }, { packages: { lengthCm: "abc" } }, { boxCount: 0 }, { boxCount: 1.5 }, { boxCount: 500 }]) {
+    const r = await act(erp, "dispatch", bad);
+    assert.equal(r.status, 400, JSON.stringify(bad));
+    assert.equal(r.json.code, "VALIDATION_ERROR");
+  }
+  assert.equal(mock.state.calls.length, before);
+});
+
+test("an opaque 500 from Rafttaar queues the dispatch; abandoning unblocks the order; a corrected retry then works", async () => {
+  const { remote, erp } = await readyToDispatch();
+  const { RafttaarClient } = await import("../src/integrations/rafttaar/client.js");
+  M.config._setClientForTests(new RafttaarClient({ apiKey: mock.apiKey, baseUrl: mock.baseUrl, maxRetries: 0, sleep: async () => {} }));
+  mock.failNext(new RegExp(`POST .*${remote.order.id}/dispatch`), { status: 500, times: 100, body: { statusCode: 500, message: "Internal Server Error" } });
+
+  const r = await act(erp, "dispatch", { packages: { weightKg: 1 } });
+  assert.equal(r.status, 202, r.text);
+  const queued = await M.Action.findOne({ rafttaarOrderId: remote.order.id, type: "dispatch", status: "pending" });
+  assert.equal(queued.lastError.httpStatus, 500);
+  assert.equal((await act(erp, "dispatch")).json.code, "ACTION_IN_PROGRESS"); // order is blocked while it waits
+
+  mock.state.failNext.length = 0;
+  const ab = await call("POST", `/api/rafttaar/actions/${queued._id}/abandon`, {});
+  assert.equal(ab.status, 200, ab.text);
+  assert.equal(ab.json.data.outcome, "abandoned");
+  const after = await M.Action.findById(queued._id);
+  assert.equal(after.status, "failed");
+  assert.equal(after.lastError.code, "ABANDONED");
+
+  M.config._setClientForTests(new RafttaarClient({ apiKey: mock.apiKey, baseUrl: mock.baseUrl, ratePerSec: 1000, burst: 1000, sleep: async () => {} }));
+  assert.equal((await act(erp, "dispatch", { packages: { weightKg: 2 } })).status, 200);
+  assert.equal((await erpOrderFor(remote.order.id)).status, "shipped");
+});
+
+test("abandon never causes a double booking: if the 'failed' attempt actually went through, it is recorded as done", async () => {
+  const { remote, erp } = await readyToDispatch();
+  const { RafttaarClient } = await import("../src/integrations/rafttaar/client.js");
+  M.config._setClientForTests(new RafttaarClient({ apiKey: mock.apiKey, baseUrl: mock.baseUrl, maxRetries: 0, sleep: async () => {} }));
+  // Rafttaar books the shipment but the response is lost (we see a 502)
+  const rec = mock.state.orders.get(remote.order.id);
+  mock.failNext(new RegExp(`POST .*${remote.order.id}/dispatch`), { status: 502, times: 100 });
+  const r = await act(erp, "dispatch", {});
+  assert.equal(r.status, 202);
+  rec.lock.state = "dispatched";
+  rec.shipment = { id: "11111111-1111-4111-8111-111111111111", awbNumber: "AWB1", status: "booked" };
+  mock.state.failNext.length = 0;
+
+  const queued = await M.Action.findOne({ rafttaarOrderId: remote.order.id, type: "dispatch", status: "pending" });
+  const ab = await call("POST", `/api/rafttaar/actions/${queued._id}/abandon`, {});
+  assert.equal(ab.json.data.outcome, "already_applied");
+  assert.equal((await M.Action.findById(queued._id)).status, "succeeded");
+  assert.equal((await erpOrderFor(remote.order.id)).rafttaar.fulfilmentState, "dispatched");
+  assert.equal((await call("POST", `/api/rafttaar/actions/${queued._id}/abandon`, {})).json.code, "NOT_ABANDONABLE");
+  M.config._setClientForTests(new RafttaarClient({ apiKey: mock.apiKey, baseUrl: mock.baseUrl, ratePerSec: 1000, burst: 1000, sleep: async () => {} }));
+});

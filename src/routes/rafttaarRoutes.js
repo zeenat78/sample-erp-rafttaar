@@ -18,6 +18,7 @@ router.get("/events", c.listEvents);
 router.post("/events/:id/retry", c.retryEvent);
 router.get("/actions", c.listActions);
 router.post("/actions/:id/retry", c.retryAction);
+router.post("/actions/:id/abandon", c.abandonActionRoute);
 
 // webhooks
 router.get("/webhooks", c.whList);

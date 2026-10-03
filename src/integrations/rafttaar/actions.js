@@ -64,14 +64,29 @@ export function validatePayload(type, payload = {}) {
     }
     case "cancel":
       return { reason: payload.reason ? String(payload.reason).trim() : undefined };
-    case "dispatch":
+    case "dispatch": {
+      // Garbage here (blank weight, 32 boxes of 1cm...) used to reach the carrier API and come back as an opaque 500.
+      const packages = {};
+      for (const k of ["weightKg", "lengthCm", "widthCm", "heightCm"]) {
+        const v = payload.packages?.[k];
+        if (v === undefined || v === null || v === "") continue;
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) throw new ActionError(400, "VALIDATION_ERROR", `${k} must be a positive number`);
+        packages[k] = n;
+      }
+      let boxCount;
+      if (payload.boxCount !== undefined && payload.boxCount !== null && payload.boxCount !== "") {
+        boxCount = Number(payload.boxCount);
+        if (!Number.isInteger(boxCount) || boxCount < 1 || boxCount > 100) throw new ActionError(400, "VALIDATION_ERROR", "boxCount must be a whole number between 1 and 100");
+      }
       return {
         locationExternalId: payload.locationExternalId || undefined,
         locationId: payload.locationId || undefined,
-        packages: payload.packages,
-        boxCount: payload.boxCount,
+        packages,
+        boxCount,
         ewayBillNo: payload.ewayBillNo ? String(payload.ewayBillNo).trim() : undefined
       };
+    }
     case "invoice_create":
       if (!payload.invoiceId) throw new ActionError(400, "VALIDATION_ERROR", "invoiceId (local draft) is required");
       return { invoiceId: String(payload.invoiceId) };
@@ -131,7 +146,9 @@ async function callRafttaar(client, action) {
         if (!loc?.rafttaar?.id) throw new ActionError(409, "LOCATION_NOT_SYNCED", `Location ${p.locationExternalId} has not been synced to Rafttaar yet`);
         locationId = loc.rafttaar.id;
       }
-      const packages = p.packages && Object.keys(p.packages).length ? p.packages : { weightKg: d.weightKg, lengthCm: d.lengthCm, widthCm: d.widthCm, heightCm: d.heightCm };
+      // Fill whatever the user left blank from the saved defaults — the carrier needs weight AND dimensions,
+      // and sending only the fields that were typed (e.g. dimensions without a weight) made Rafttaar answer 500.
+      const packages = { weightKg: d.weightKg, lengthCm: d.lengthCm, widthCm: d.widthCm, heightCm: d.heightCm, ...(p.packages || {}) };
       return client.dispatchOrder(id, { locationId, packages, boxCount: p.boxCount || d.boxCount || 1, ewayBillNo: p.ewayBillNo }, opts);
     }
     case "invoice_create": {
@@ -254,6 +271,43 @@ export async function executeAction(action, { client } = {}) {
     }
     throw error;
   }
+}
+
+/**
+ * Give up on an action that is still waiting to be retried (e.g. Rafttaar keeps answering 500 and the user wants
+ * to fix the input and try again). Safe against double-acting: the order is re-read from Rafttaar first, and if the
+ * action in fact already took effect on their side (an earlier attempt got through), it is recorded as succeeded
+ * instead of being abandoned — otherwise a fresh attempt with a new idempotency key could book a second shipment.
+ */
+export async function abandonAction(action, { client } = {}) {
+  if (!["pending", "dead"].includes(action.status)) {
+    throw new ActionError(409, "NOT_ABANDONABLE", "Only actions that are still waiting to be retried can be abandoned");
+  }
+  client = client || getClient();
+  const effect = { acknowledge: "acknowledged", cancel: "cancelled", dispatch: "dispatched" }[action.type];
+  if (effect) {
+    try {
+      const order = await syncOrderById(action.rafttaarOrderId, { client });
+      const state = order?.rafttaar?.fulfilmentState;
+      const applied = state === effect || (action.type === "dispatch" && state === "delivered") || (action.type === "status" && state === action.payload?.status);
+      if (applied) {
+        action.status = "succeeded";
+        action.completedAt = new Date();
+        action.nextRetryAt = undefined;
+        action.lastError = { code: "ALREADY_APPLIED", message: `Rafttaar already shows this order as ${state}; the earlier attempt went through.` };
+        await action.save();
+        return { outcome: "already_applied", state };
+      }
+    } catch {
+      /* cannot verify (Rafttaar unreachable): fall through and abandon, the user is told below */
+    }
+  }
+  action.status = "failed";
+  action.completedAt = new Date();
+  action.nextRetryAt = undefined;
+  action.lastError = { code: "ABANDONED", message: "Abandoned by the user before it succeeded" };
+  await action.save();
+  return { outcome: "abandoned" };
 }
 
 // --------------------------------------------------------------- outbox worker

@@ -4,7 +4,7 @@ import { Location } from "../models/Location.js";
 import { InventoryItem } from "../models/InventoryItem.js";
 import { RafttaarAction } from "../models/RafttaarAction.js";
 import { RafttaarEvent } from "../models/RafttaarEvent.js";
-import { ActionError, assertIdle, executeAction, performAction } from "../integrations/rafttaar/actions.js";
+import { ActionError, abandonAction, assertIdle, executeAction, performAction } from "../integrations/rafttaar/actions.js";
 import { getClient, getSettings, isConfigured, loadConfig, maskedKey, updateSettings } from "../integrations/rafttaar/config.js";
 import { ingestEvent } from "../integrations/rafttaar/eventProcessor.js";
 import { createInvoiceDraft, renderInvoicePdf } from "../integrations/rafttaar/invoiceBuilder.js";
@@ -162,6 +162,12 @@ export async function retryAction(req, res) {
   await action.save();
   const result = await executeAction(action);
   ok(res, { status: result.status });
+}
+
+export async function abandonActionRoute(req, res) {
+  const action = await RafttaarAction.findById(req.params.id);
+  if (!action) return res.status(404).json({ success: false, code: "NOT_FOUND", message: "Action not found" });
+  ok(res, await abandonAction(action));
 }
 
 // ===================================================================== webhooks
