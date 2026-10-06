@@ -4,8 +4,10 @@ const state = { orders: [], search: "", status: "", source: "" };
 
 const $ = (selector) => document.querySelector(selector);
 
+// Always two decimals: the stored order total is exact (Rafttaar paise / 100), so rounding to whole
+// rupees here made the ERP disagree with the buyer and seller dashboards (e.g. 220.66 showed as 221).
 function money(value) {
-  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 }
 
 function escapeHtml(value) {
