@@ -3,6 +3,10 @@
 // All dynamic values are passed through escapeHtml before they reach innerHTML.
 
 const E = escapeHtml;
+// Rafttaar issues every invoice, so the ERP no longer creates or voids its own. The backend routes and
+// invoiceBuilder stay for sellers still on invoiceSource=erp; flip this to bring the UI back.
+const INVOICE_CREATION_UI = false;
+
 const when = (d) => (d ? new Date(d).toLocaleString("en-IN") : "—");
 const kv = (label, value) => `<div class="detail-line"><span>${E(label)}</span>${value === undefined || value === null || value === "" ? "—" : E(value)}</div>`;
 
@@ -47,8 +51,10 @@ async function mountRafttaarPanel(order, refreshModal) {
     if (allowed.has("confirmed")) buttons.push(btn("confirmed", "Confirm"));
     if (allowed.has("packaging")) buttons.push(btn("packaging", "Mark packaging"));
     if (allowed.has("delayed")) buttons.push(btn("delayed", "Mark delayed"));
-    if (!activeInvoice) buttons.push(btn("invoice", "Create invoice"));
-    else if (!["dispatched", "delivered"].includes(state)) buttons.push(btn("void", "Void invoice"));
+    if (INVOICE_CREATION_UI) {
+      if (!activeInvoice) buttons.push(btn("invoice", "Create invoice"));
+      else if (!["dispatched", "delivered"].includes(state)) buttons.push(btn("void", "Void invoice"));
+    }
     if (allowed.has("dispatched") || ["acknowledged", "confirmed", "packaging", "delayed"].includes(state)) buttons.push(btn("dispatch", "Dispatch", "primary"));
     if (allowed.has("cancelled")) buttons.push(btn("cancel", "Cancel order"));
   }
@@ -492,7 +498,7 @@ const TAB_RENDERERS = {
     const s = d.dispatchDefaults || {};
     tabBody().innerHTML = `
       ${card("Polling", `<form id="setPoll" class="toolbar flush"><label class="field">Poll every (seconds)<input name="pollIntervalSec" type="number" min="2" max="3600" value="${E(d.sync.pollIntervalSec)}"></label><button class="primary">Save</button></form>`)}
-      ${card("Invoice defaults", `<form id="setInv" class="form"><div class="form-grid">
+      ${!INVOICE_CREATION_UI ? "" : card("Invoice defaults", `<form id="setInv" class="form"><div class="form-grid">
         <label class="field">Seller GSTIN<input name="sellerGstin" value="${E(i.sellerGstin)}"></label>
         <label class="field">Seller state (decides CGST+SGST vs IGST)<input name="sellerState" value="${E(i.sellerState)}"></label>
         <label class="field">Default HSN<input name="defaultHsn" value="${E(i.defaultHsn)}"></label>
@@ -511,7 +517,7 @@ const TAB_RENDERERS = {
         guarded(() => api("/rafttaar/settings", { method: "PATCH", body: JSON.stringify(build(Object.fromEntries(new FormData(e.currentTarget)))) }).then(() => toast("Saved")), { reload: loadIntegration });
       });
     save("#setPoll", (f) => ({ pollIntervalSec: Number(f.pollIntervalSec) }));
-    save("#setInv", (f) => ({ invoice: f }));
+    if (INVOICE_CREATION_UI) save("#setInv", (f) => ({ invoice: f }));
     save("#setDisp", (f) => ({ dispatchDefaults: f }));
   }
 };
