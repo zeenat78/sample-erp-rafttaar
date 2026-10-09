@@ -108,7 +108,7 @@ export async function startMockRafttaar({ apiKey = "rtk_test_mockkey" } = {}) {
       body = undefined;
     }
     const url = new URL(req.url, "http://x");
-    const base = "/api/v1/central-service/partner/v1";
+    const base = "/api/v1/integrations-service/partner/v1";
     const path = url.pathname.startsWith(base) ? url.pathname.slice(base.length) : url.pathname;
     const sig = `${req.method} ${path}`;
     state.calls.push({ method: req.method, path, query: Object.fromEntries(url.searchParams), headers: req.headers, body });
@@ -292,7 +292,7 @@ export async function startMockRafttaar({ apiKey = "rtk_test_mockkey" } = {}) {
   });
 
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
-  const baseUrl = `http://127.0.0.1:${server.address().port}/api/v1/central-service/partner/v1`;
+  const baseUrl = `http://127.0.0.1:${server.address().port}/api/v1/integrations-service/partner/v1`;
   return {
     baseUrl,
     apiKey,
