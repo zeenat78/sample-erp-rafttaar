@@ -272,7 +272,7 @@ Rafttaar  ◀──acknowledge / confirm / packaging / delay / cancel / invoice 
 
 ```env
 RAFTTAAR_API_KEY=rtk_test_...            # rtk_test_ = sandbox, rtk_live_ = real (the prefix decides)
-RAFTTAAR_BASE_URL=https://raf-api.bellcorpstudio.com/api/v1/central-service/partner/v1
+RAFTTAAR_BASE_URL=https://raf-api.bellcorpstudio.com/api/v1/integrations-service/partner/v1
 PUBLIC_BASE_URL=https://<public https origin of this ERP>   # ngrok URL locally, Render URL when deployed
 RAFTTAAR_WORKERS=on                      # "off" = API only, no poller / outbox worker
 ```
